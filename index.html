@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MAZ Safety Form</title>
+  <style>
+    :root{--bg:#0b1220;--card:#121b2f;--muted:#93a4c7;--txt:#eaf0ff;--line:#24304d;--ok:#18a957;--warn:#f0b429;--bad:#e5484d;}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Tahoma,Arial;background:linear-gradient(180deg,#0a1020,#070b14);color:var(--txt);}
+    .wrap{max-width:760px;margin:0 auto;padding:16px;}
+    .top{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:8px 0 14px;}
+    .badge{font-size:12px;color:var(--muted);border:1px solid var(--line);padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.02)}
+    .card{background:rgba(18,27,47,.9);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .col{flex:1 1 240px}
+    .k{font-size:12px;color:var(--muted);margin-bottom:4px}
+    .v{font-size:14px;word-break:break-word}
+    .qtitle{font-size:18px;line-height:1.5;margin:6px 0 10px}
+    .qmeta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+    .pill{font-size:12px;color:var(--muted);border:1px dashed var(--line);padding:4px 8px;border-radius:999px}
+    .btns{display:flex;gap:10px;flex-wrap:wrap}
+    button{cursor:pointer;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--txt);padding:10px 12px;border-radius:12px;font-size:14px}
+    button.primary{background:rgba(24,169,87,.18);border-color:rgba(24,169,87,.35)}
+    button.warn{background:rgba(240,180,41,.14);border-color:rgba(240,180,41,.35)}
+    button.danger{background:rgba(229,72,77,.14);border-color:rgba(229,72,77,.35)}
+    button:disabled{opacity:.45;cursor:not-allowed}
+    .input, textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);background:rgba(0,0,0,.18);color:var(--txt);padding:10px 12px;border-radius:12px;font-size:14px}
+    textarea{min-height:86px;resize:vertical}
+    .hint{font-size:12px;color:var(--muted);margin-top:6px}
+    .sep{height:1px;background:var(--line);margin:12px 0}
+    .footer{display:flex;gap:10px;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap}
+    .progress{font-size:12px;color:var(--muted)}
+    .toast{margin-top:10px;font-size:13px;color:var(--muted)}
+    .err{color:#ffd1d1}
+    .ok{color:#c6ffe0}
+    .hide{display:none}
+    .photoPreview{margin-top:8px;border:1px solid var(--line);border-radius:12px;overflow:hidden;max-height:240px}
+    .photoPreview img{width:100%;height:auto;display:block}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="badge" id="modeBadge">MAZ Safety Form</div>
+      <div class="badge" id="langBadge"></div>
+    </div>
+
+    <div class="card" id="infoCard">
+      <div class="row">
+        <div class="col"><div class="k">Visit ID</div><div class="v" id="visitIdV">-</div></div>
+        <div class="col"><div class="k">Work ID</div><div class="v" id="workIdV">-</div></div>
+        <div class="col"><div class="k">TG ID</div><div class="v" id="tgIdV">-</div></div>
+      </div>
+      <div class="sep"></div>
+      <div class="row">
+        <div class="col"><div class="k">Type</div><div class="v" id="typeV">-</div></div>
+        <div class="col"><div class="k">Status</div><div class="v" id="statusV">Loading…</div></div>
+      </div>
+    </div>
+
+    <div style="height:12px"></div>
+
+    <div class="card" id="qCard">
+      <div class="qmeta" id="qMeta"></div>
+      <div class="qtitle" id="qText">Loading…</div>
+
+      <div id="answerArea"></div>
+
+      <div class="sep"></div>
+      <div class="footer">
+        <div class="progress" id="progressTxt">-</div>
+        <div class="btns">
+          <button id="prevBtn">السابق</button>
+          <button class="primary" id="nextBtn">التالي</button>
+          <button class="warn" id="submitBtn">إرسال</button>
+        </div>
+      </div>
+
+      <div class="toast" id="toast"></div>
+    </div>
+  </div>
+
+<script>
+/*** CONFIG ***/
+const FORMS_CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRVzVaXmgsKgqc9Xvi22N8aUI1x-F2U1pVrcvK_cS02t0pNC4QaOk6ThsIPXLfMbXI3BDiyTy0JT7wI/pub?gid=471739737&single=true&output=csv";
+
+const ANSWERS_WEBHOOK_URL =
+  "https://almazyad1.app.n8n.cloud/webhook/06e6a35f-bcbb-43b2-8129-e59a662e2da4";
+
+// مؤقتًا: submit للـ ENTRY فقط (إلى ما نسوي submit-exit/submit-correction)
+const SUBMIT_ENTRY_WEBHOOK_URL =
+  "https://almazyad1.app.n8n.cloud/webhook/submit-entry";
+
+/*** Helpers ***/
+const qs = new URLSearchParams(location.search);
+const visitId = (qs.get("visitId") || "").trim();
+const workId  = (qs.get("workId")  || "").trim();
+const tgId    = (qs.get("tgId")    || "").trim();
+const type    = ((qs.get("type")   || "ENTRY").trim().toUpperCase());
+const lang    = ((qs.get("lang")   || "AR").trim().toUpperCase());
+
+const $ = (id)=>document.getElementById(id);
+const key = `MAZ_FORM_${visitId}_${type}`;
+
+function setRTL(){
+  const isAR = (lang === "AR");
+  document.documentElement.lang = isAR ? "ar" : "en";
+  document.documentElement.dir  = isAR ? "rtl" : "ltr";
+  $("langBadge").textContent = `Lang: ${lang}`;
+}
+setRTL();
+
+function toast(msg, ok=true){
+  $("toast").className = "toast " + (ok ? "ok" : "err");
+  $("toast").textContent = msg || "";
+}
+function isoNow(){ return new Date().toISOString(); }
+
+function parseCSV(text){
+  // CSV بسيط (يدعم "" داخل الحقول)
+  const rows = [];
+  let row = [], cur = "", inQ = false;
+  for (let i=0;i<text.length;i++){
+    const c = text[i], n = text[i+1];
+    if (c === '"' && inQ && n === '"'){ cur += '"'; i++; continue; }
+    if (c === '"'){ inQ = !inQ; continue; }
+    if (c === ',' && !inQ){ row.push(cur); cur=""; continue; }
+    if ((c === '\n' || c === '\r') && !inQ){
+      if (cur.length || row.length){ row.push(cur); rows.push(row); }
+      cur=""; row=[];
+      if (c === '\r' && n === '\n') i++;
+      continue;
+    }
+    cur += c;
+  }
+  if (cur.length || row.length){ row.push(cur); rows.push(row); }
+  const header = (rows.shift() || []).map(h=>h.trim());
+  return rows
+    .filter(r=>r.some(x=>String(x||"").trim()!==""))
+    .map(r=>{
+      const o={};
+      header.forEach((h,idx)=>o[h]= (r[idx] ?? "").trim());
+      return o;
+    });
+}
+
+function withinActiveWindow(q){
+  // Active_From / Active_To: لو فاضي = مفتوح
+  const now = new Date();
+  const from = q.Active_From ? new Date(q.Active_From) : null;
+  const to   = q.Active_To   ? new Date(q.Active_To)   : null;
+  if (from && !isNaN(from) && now < from) return false;
+  if (to && !isNaN(to) && now > to) return false;
+  return true;
+}
+
+function pickText(q){
+  if (lang === "EN") return q["Text_EN"] || q["Text_AR"] || q["Text_UR"] || "";
+  if (lang === "UR") return q["Text_UR"] || q["Text_AR"] || q["Text_EN"] || "";
+  return q["Text_AR"] || q["Text_EN"] || q["Text_UR"] || "";
+}
+
+function normYN(v){
+  v = String(v||"").trim().toUpperCase();
+  if (["Y","YES","TRUE","1"].includes(v)) return "Y";
+  if (["N","NO","FALSE","0"].includes(v)) return "N";
+  return v;
+}
+
+function getState(){
+  try { return JSON.parse(localStorage.getItem(key) || "{}"); } catch { return {}; }
+}
+function setState(s){
+  localStorage.setItem(key, JSON.stringify(s));
+}
+
+/*** UI bind header ***/
+$("visitIdV").textContent = visitId || "(missing)";
+$("workIdV").textContent  = workId  || "(missing)";
+$("tgIdV").textContent    = tgId    || "(missing)";
+$("typeV").textContent    = type;
+$("modeBadge").textContent = `MAZ Safety Form • ${type}`;
+
+let questions = [];
+let idx = 0;
+
+function requireParamsOk(){
+  if (!visitId) return false;
+  // workId,tgId ممكن تكون فاضية أحياناً — نخليها تمشي
+  return true;
+}
+
+function buildAnswerUI(q, prev){
+  const area = $("answerArea");
+  area.innerHTML = "";
+
+  const inputType = (q.Input_Type || "yesno").trim().toLowerCase();
+  const needPhoto = normYN(q.Require_Photo) === "Y";
+  const needNote  = normYN(q.Require_Note)  === "Y";
+
+  const wrap = document.createElement("div");
+
+  // Answer control
+  let answerEl = null;
+
+  if (inputType === "yesno" || inputType === "yn" || inputType === "bool"){
+    const btnWrap = document.createElement("div");
+    btnWrap.className = "btns";
+
+    const mk = (label, val, cls="")=>{
+      const b = document.createElement("button");
+      b.textContent = label;
+      if (cls) b.className = cls;
+      b.onclick = ()=>{ answerEl.value = val; highlight(); };
+      return b;
+    };
+
+    answerEl = document.createElement("input");
+    answerEl.type = "hidden";
+    answerEl.value = prev?.answer || "";
+
+    const yes = mk(lang==="AR"?"نعم":"Yes","YES","primary");
+    const no  = mk(lang==="AR"?"لا":"No","NO","");
+    const nok = mk(lang==="AR"?"غير مطابق":"NOK","NOK","danger");
+
+    btnWrap.append(yes,no,nok);
+    wrap.appendChild(btnWrap);
+
+    const hint = document.createElement("div");
+    hint.className="hint";
+    hint.textContent = (lang==="AR")
+      ? "اختر الإجابة ثم اضغط التالي."
+      : "Choose an answer then Next.";
+    wrap.appendChild(hint);
+
+    function highlight(){
+      const v = (answerEl.value||"").toUpperCase();
+      [yes,no,nok].forEach(b=>b.style.outline="none");
+      if (v==="YES") yes.style.outline="2px solid rgba(24,169,87,.6)";
+      if (v==="NO")  no.style.outline ="2px solid rgba(255,255,255,.25)";
+      if (v==="NOK") nok.style.outline="2px solid rgba(229,72,77,.6)";
+    }
+    highlight();
+  } else {
+    // generic input
+    const inp = document.createElement(inputType === "textarea" ? "textarea" : "input");
+    inp.className = inputType === "textarea" ? "" : "input";
+    if (inp.tagName === "INPUT"){
+      inp.type = (["text","number","date","time"].includes(inputType)) ? inputType : "text";
+    }
+    inp.value = prev?.answer || "";
+    answerEl = inp;
+    wrap.appendChild(inp);
+  }
+
+  // Note
+  let noteEl = null;
+  if (needNote){
+    const lab = document.createElement("div");
+    lab.className="k"; lab.style.marginTop="10px";
+    lab.textContent = (lang==="AR") ? "ملاحظة" : "Note";
+    noteEl = document.createElement("textarea");
+    noteEl.value = prev?.note || "";
+    wrap.append(lab, noteEl);
+  }
+
+  // Photo
+  let photoEl = null, photoPreviewImg = null;
+  if (needPhoto){
+    const lab = document.createElement("div");
+    lab.className="k"; lab.style.marginTop="10px";
+    lab.textContent = (lang==="AR") ? "صورة" : "Photo";
+
+    photoEl = document.createElement("input");
+    photoEl.type = "file";
+    photoEl.accept = "image/*";
+    photoEl.className = "input";
+
+    const preview = document.createElement("div");
+    preview.className = "photoPreview " + (prev?.photoBase64 ? "" : "hide");
+
+    photoPreviewImg = document.createElement("img");
+    if (prev?.photoBase64) photoPreviewImg.src = prev.photoBase64;
+    preview.appendChild(photoPreviewImg);
+
+    const hint = document.createElement("div");
+    hint.className="hint";
+    hint.textContent = (lang==="AR")
+      ? "اختيار صورة (سيتم إرسالها Base64 - الأفضل لاحقًا نخزنها في Drive)."
+      : "Pick an image (sent as Base64 - later we can store in Drive).";
+
+    wrap.append(lab, photoEl, preview, hint);
+
+    photoEl.addEventListener("change", async ()=>{
+      const f = photoEl.files?.[0];
+      if (!f) return;
+      const b64 = await fileToBase64(f);
+      photoPreviewImg.src = b64;
+      preview.classList.remove("hide");
+    });
+  }
+
+  area.appendChild(wrap);
+
+  return {
+    getAnswer: ()=> answerEl?.value ?? "",
+    getNote:   ()=> noteEl?.value ?? "",
+    getPhotoBase64: ()=> (photoPreviewImg?.src && photoPreviewImg.src.startsWith("data:image/")) ? photoPreviewImg.src : (prev?.photoBase64 || "")
+  };
+}
+
+function fileToBase64(file){
+  return new Promise((res, rej)=>{
+    const r = new FileReader();
+    r.onload = ()=>res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+function render(){
+  const q = questions[idx];
+  if (!q){
+    $("statusV").textContent = "No questions";
+    $("qText").textContent = (lang==="AR") ? "لا توجد أسئلة مطابقة." : "No matching questions.";
+    $("answerArea").innerHTML = "";
+    $("progressTxt").textContent = "";
+    $("prevBtn").disabled = true;
+    $("nextBtn").disabled = true;
+    $("submitBtn").disabled = true;
+    return;
+  }
+
+  $("statusV").textContent = "READY";
+  $("qText").textContent = pickText(q) || `(Question ${idx+1})`;
+
+  const meta = [];
+  if (q.Category) meta.push(`Category: ${q.Category}`);
+  if (normYN(q.Is_Critical)==="Y") meta.push("CRITICAL");
+  meta.push(`ID: ${q.Question_ID}`);
+  $("qMeta").innerHTML = meta.map(x=>`<span class="pill">${escapeHtml(x)}</span>`).join("");
+
+  const state = getState();
+  const prev = (state.answers || {})[q.Question_ID] || null;
+  const ui = buildAnswerUI(q, prev);
+
+  $("progressTxt").textContent = `${idx+1} / ${questions.length}`;
+
+  $("prevBtn").disabled = idx === 0;
+  $("nextBtn").disabled = false;
+  $("submitBtn").disabled = false;
+
+  $("prevBtn").onclick = ()=>{
+    idx = Math.max(0, idx-1);
+    setState({ ...state, idx });
+    toast("");
+    render();
+  };
+
+  $("nextBtn").onclick = async ()=>{
+    const payload = buildAnswerPayload(q, ui);
+    const ok = await sendAnswer(payload);
+    if (!ok) return;
+
+    saveLocal(q, ui);
+    idx = Math.min(questions.length-1, idx+1);
+    setState({ ...getState(), idx });
+    toast((lang==="AR")?"تم الحفظ ✅":"Saved ✅", true);
+    render();
+  };
+
+  $("submitBtn").onclick = async ()=>{
+    // احفظ إجابة السؤال الحالي قبل الإرسال
+    const payload = buildAnswerPayload(q, ui);
+    const ok1 = await sendAnswer(payload);
+    if (!ok1) return;
+    saveLocal(q, ui);
+
+    // Submit
+    const ok2 = await submitVisit();
+    if (!ok2) return;
+
+    toast((lang==="AR")?"تم الإرسال ✅":"Submitted ✅", true);
+    $("statusV").textContent = "SUBMITTED";
+  };
+}
+
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g, m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+}
+
+function buildAnswerPayload(q, ui){
+  return {
+    visitId, workId, tgId, type,
+    questionId: q.Question_ID,
+    answer: (ui.getAnswer() || "").trim(),
+    note: (ui.getNote() || "").trim(),
+    photoBase64: ui.getPhotoBase64() || "",
+    createdAt: isoNow()
+  };
+}
+
+function saveLocal(q, ui){
+  const state = getState();
+  const answers = state.answers || {};
+  answers[q.Question_ID] = {
+    answer: ui.getAnswer(),
+    note: ui.getNote(),
+    photoBase64: ui.getPhotoBase64(),
+    savedAt: isoNow()
+  };
+  setState({ ...state, answers, idx });
+}
+
+async function sendAnswer(payload){
+  // تحقق بسيط: لازم answer ما يكون فاضي
+  if (!payload.answer){
+    toast((lang==="AR")?"اختر/اكتب إجابة أولاً.":"Please provide an answer first.", false);
+    return false;
+  }
+  try{
+    toast((lang==="AR")?"جارٍ الحفظ…":"Saving…", true);
+    const r = await fetch(ANSWERS_WEBHOOK_URL, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json().catch(()=>null);
+    if (!r.ok || !j?.ok){
+      toast((lang==="AR")?"فشل الحفظ (Webhook)":"Save failed (Webhook)", false);
+      return false;
+    }
+    return true;
+  }catch(e){
+    toast((lang==="AR")?"فشل الاتصال بالويبهوك":"Webhook connection failed", false);
+    return false;
+  }
+}
+
+async function submitVisit(){
+  // حالياً ندعم submit للـ ENTRY فقط
+  if (type !== "ENTRY"){
+    toast((lang==="AR")?"Submit لهذا النوع غير مفعّل الآن (بنضيفه بعد HTML).":"Submit for this type is not enabled yet (we'll add after HTML).", false);
+    return false;
+  }
+  try{
+    toast((lang==="AR")?"جارٍ الإرسال…":"Submitting…", true);
+    const r = await fetch(SUBMIT_ENTRY_WEBHOOK_URL, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ visitId, workId, tgId, type, submittedAt: isoNow() })
+    });
+    const j = await r.json().catch(()=>null);
+    if (!r.ok || !j?.ok){
+      toast((lang==="AR")?"فشل الإرسال (Submit)":"Submit failed", false);
+      return false;
+    }
+    return true;
+  }catch(e){
+    toast((lang==="AR")?"فشل الاتصال (Submit)":"Submit connection failed", false);
+    return false;
+  }
+}
+
+async function loadQuestions(){
+  if (!requireParamsOk()){
+    $("statusV").textContent = "ERROR";
+    $("qText").textContent = (lang==="AR")
+      ? "الرابط ناقص (visitId مطلوب)."
+      : "Missing parameter (visitId required).";
+    $("answerArea").innerHTML = "";
+    $("prevBtn").disabled = true;
+    $("nextBtn").disabled = true;
+    $("submitBtn").disabled = true;
+    return;
+  }
+
+  $("statusV").textContent = "LOADING…";
+  toast((lang==="AR")?"تحميل الأسئلة…":"Loading questions…", true);
+
+  const res = await fetch(FORMS_CSV_URL, { cache:"no-store" });
+  const txt = await res.text();
+  const rows = parseCSV(txt);
+
+  const filtered = rows
+    .filter(r => String(r.Form_Type||"").trim().toUpperCase() === type)
+    .filter(r => normYN(r.Enabled) === "Y")
+    .filter(withinActiveWindow)
+    .sort((a,b)=> Number(a.Order||0) - Number(b.Order||0));
+
+  questions = filtered;
+
+  const state = getState();
+  idx = Math.min(Math.max(0, Number(state.idx||0)), Math.max(0, questions.length-1));
+  setState({ ...state, idx });
+
+  toast("", true);
+  render();
+}
+
+loadQuestions();
+</script>
+</body>
+</html>
