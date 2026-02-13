@@ -377,8 +377,8 @@ function render(){
     if (!ok1) return;
     saveLocal(q, ui);
 
-    // Submit
-    const ok2 = await submitVisit();
+    // Submit (معدّل: يرسل كل الإجابات + يدمج آخر سؤال احتياط)
+    const ok2 = await submitVisit(payload);
     if (!ok2) return;
 
     toast((lang==="AR")?"تم الإرسال ✅":"Submitted ✅", true);
@@ -426,8 +426,17 @@ async function sendAnswer(payload){
       headers:{ "Content-Type":"application/json" },
       body: JSON.stringify(payload)
     });
-    const j = await r.json().catch(()=>null);
-    if (!r.ok || !j?.ok){
+
+    // لا نفترض JSON (عشان ما يفشل لو الويبهوك رجع نص)
+    const text = await r.text();
+    let j = null;
+    try { j = text ? JSON.parse(text) : null; } catch {}
+
+    if (!r.ok){
+      toast((lang==="AR")?"فشل الحفظ (Webhook)":"Save failed (Webhook)", false);
+      return false;
+    }
+    if (j && j.ok === false){
       toast((lang==="AR")?"فشل الحفظ (Webhook)":"Save failed (Webhook)", false);
       return false;
     }
@@ -438,25 +447,70 @@ async function sendAnswer(payload){
   }
 }
 
-async function submitVisit(){
-  // حالياً ندعم submit للـ ENTRY فقط
+/*** ✅ submitVisit() بعد التعديل: يرسل كل الإجابات دفعة واحدة + ما يفترض JSON ***/
+async function submitVisit(payloadCurrent=null){
   if (type !== "ENTRY"){
-    toast((lang==="AR")?"Submit لهذا النوع غير مفعّل الآن (بنضيفه بعد HTML).":"Submit for this type is not enabled yet (we'll add after HTML).", false);
+    toast((lang==="AR")?"Submit لهذا النوع غير مفعّل الآن.":"Submit for this type is not enabled yet.", false);
     return false;
   }
+
+  // اجمع كل الإجابات المخزنة محليًا
+  const state = getState();
+  const answersObj = state.answers || {};
+
+  // دمج إجابة السؤال الحالي (احتياط)
+  if (payloadCurrent?.questionId){
+    answersObj[payloadCurrent.questionId] = {
+      answer: payloadCurrent.answer || "",
+      note: payloadCurrent.note || "",
+      photoBase64: payloadCurrent.photoBase64 || "",
+      savedAt: payloadCurrent.createdAt || isoNow()
+    };
+  }
+
+  // حوّلها لمصفوفة
+  const answers = Object.entries(answersObj).map(([questionId, v]) => ({
+    questionId,
+    answer: (v?.answer || "").trim(),
+    note: (v?.note || "").trim(),
+    photoBase64: v?.photoBase64 || "",
+    savedAt: v?.savedAt || ""
+  }));
+
+  if (!answers.length){
+    toast((lang==="AR")?"ما فيه إجابات محفوظة للإرسال.":"No saved answers to submit.", false);
+    return false;
+  }
+
   try{
     toast((lang==="AR")?"جارٍ الإرسال…":"Submitting…", true);
+
     const r = await fetch(SUBMIT_ENTRY_WEBHOOK_URL, {
       method:"POST",
       headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ visitId, workId, tgId, type, submittedAt: isoNow() })
+      body: JSON.stringify({
+        visitId, workId, tgId, type,
+        submittedAt: isoNow(),
+        answers
+      })
     });
-    const j = await r.json().catch(()=>null);
-    if (!r.ok || !j?.ok){
+
+    // لا نفترض JSON
+    const text = await r.text();
+    let j = null;
+    try { j = text ? JSON.parse(text) : null; } catch {}
+
+    if (!r.ok){
       toast((lang==="AR")?"فشل الإرسال (Submit)":"Submit failed", false);
       return false;
     }
+    if (j && j.ok === false){
+      toast((lang==="AR")?"فشل الإرسال (Submit)":"Submit failed", false);
+      return false;
+    }
+
     return true;
+
   }catch(e){
     toast((lang==="AR")?"فشل الاتصال (Submit)":"Submit connection failed", false);
     return false;
