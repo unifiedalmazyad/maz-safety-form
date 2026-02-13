@@ -7,15 +7,15 @@
   <style>
     :root{--bg:#0b1220;--card:#121b2f;--muted:#93a4c7;--txt:#eaf0ff;--line:#24304d;--ok:#18a957;--warn:#f0b429;--bad:#e5484d;}
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Tahoma,Arial;background:linear-gradient(180deg,#0a1020,#070b14);color:var(--txt);}
-    .wrap{max-width:760px;margin:0 auto;padding:16px;}
-    .top{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:8px 0 14px;}
+    .wrap{max-width:900px;margin:0 auto;padding:16px;}
+    .top{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:8px 0 14px;flex-wrap:wrap}
     .badge{font-size:12px;color:var(--muted);border:1px solid var(--line);padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.02)}
     .card{background:rgba(18,27,47,.9);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
     .row{display:flex;gap:10px;flex-wrap:wrap}
     .col{flex:1 1 240px}
     .k{font-size:12px;color:var(--muted);margin-bottom:4px}
     .v{font-size:14px;word-break:break-word}
-    .qtitle{font-size:18px;line-height:1.5;margin:6px 0 10px}
+    .qtitle{font-size:16px;line-height:1.7;margin:6px 0 10px}
     .qmeta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
     .pill{font-size:12px;color:var(--muted);border:1px dashed var(--line);padding:4px 8px;border-radius:999px}
     .btns{display:flex;gap:10px;flex-wrap:wrap}
@@ -34,8 +34,10 @@
     .err{color:#ffd1d1}
     .ok{color:#c6ffe0}
     .hide{display:none}
-    .photoPreview{margin-top:8px;border:1px solid var(--line);border-radius:12px;overflow:hidden;max-height:240px}
-    .photoPreview img{width:100%;height:auto;display:block}
+    .qgrid{display:grid;grid-template-columns:1fr;gap:12px}
+    @media(min-width:860px){ .qgrid{grid-template-columns:1fr 1fr;} }
+    .qcard{background:rgba(18,27,47,.85);border:1px solid var(--line);border-radius:16px;padding:14px}
+    .req{color:#ffd18a;font-size:12px}
   </style>
 </head>
 <body>
@@ -61,17 +63,16 @@
     <div style="height:12px"></div>
 
     <div class="card" id="qCard">
-      <div class="qmeta" id="qMeta"></div>
       <div class="qtitle" id="qText">Loading…</div>
+      <div class="hint" id="qHint"></div>
 
-      <div id="answerArea"></div>
+      <div style="height:10px"></div>
+      <div class="qgrid" id="questionsList"></div>
 
       <div class="sep"></div>
       <div class="footer">
         <div class="progress" id="progressTxt">-</div>
         <div class="btns">
-          <button id="prevBtn">السابق</button>
-          <button class="primary" id="nextBtn">التالي</button>
           <button class="warn" id="submitBtn">إرسال</button>
         </div>
       </div>
@@ -85,10 +86,7 @@
 const FORMS_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRVzVaXmgsKgqc9Xvi22N8aUI1x-F2U1pVrcvK_cS02t0pNC4QaOk6ThsIPXLfMbXI3BDiyTy0JT7wI/pub?gid=471739737&single=true&output=csv";
 
-const ANSWERS_WEBHOOK_URL =
-  "https://almazyad1.app.n8n.cloud/webhook/submit-entry";
-
-// مؤقتًا: submit للـ ENTRY فقط (إلى ما نسوي submit-exit/submit-correction)
+// إرسال واحد فقط (كل الإجابات دفعة وحدة)
 const SUBMIT_ENTRY_WEBHOOK_URL =
   "https://almazyad1.app.n8n.cloud/webhook/submit-entry";
 
@@ -101,7 +99,6 @@ const type    = ((qs.get("type")   || "ENTRY").trim().toUpperCase());
 const lang    = ((qs.get("lang")   || "AR").trim().toUpperCase());
 
 const $ = (id)=>document.getElementById(id);
-const key = `MAZ_FORM_${visitId}_${type}`;
 
 function setRTL(){
   const isAR = (lang === "AR");
@@ -116,6 +113,10 @@ function toast(msg, ok=true){
   $("toast").textContent = msg || "";
 }
 function isoNow(){ return new Date().toISOString(); }
+
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g, m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+}
 
 function parseCSV(text){
   // CSV بسيط (يدعم "" داخل الحقول)
@@ -146,7 +147,6 @@ function parseCSV(text){
 }
 
 function withinActiveWindow(q){
-  // Active_From / Active_To: لو فاضي = مفتوح
   const now = new Date();
   const from = q.Active_From ? new Date(q.Active_From) : null;
   const to   = q.Active_To   ? new Date(q.Active_To)   : null;
@@ -168,148 +168,6 @@ function normYN(v){
   return v;
 }
 
-function getState(){
-  try { return JSON.parse(localStorage.getItem(key) || "{}"); } catch { return {}; }
-}
-function setState(s){
-  localStorage.setItem(key, JSON.stringify(s));
-}
-
-/*** UI bind header ***/
-$("visitIdV").textContent = visitId || "(missing)";
-$("workIdV").textContent  = workId  || "(missing)";
-$("tgIdV").textContent    = tgId    || "(missing)";
-$("typeV").textContent    = type;
-$("modeBadge").textContent = `MAZ Safety Form • ${type}`;
-
-let questions = [];
-let idx = 0;
-
-function requireParamsOk(){
-  if (!visitId) return false;
-  // workId,tgId ممكن تكون فاضية أحياناً — نخليها تمشي
-  return true;
-}
-
-function buildAnswerUI(q, prev){
-  const area = $("answerArea");
-  area.innerHTML = "";
-
-  const inputType = (q.Input_Type || "yesno").trim().toLowerCase();
-  const needPhoto = normYN(q.Require_Photo) === "Y";
-  const needNote  = normYN(q.Require_Note)  === "Y";
-
-  const wrap = document.createElement("div");
-
-  // Answer control
-  let answerEl = null;
-
-  if (inputType === "yesno" || inputType === "yn" || inputType === "bool"){
-    const btnWrap = document.createElement("div");
-    btnWrap.className = "btns";
-
-    const mk = (label, val, cls="")=>{
-      const b = document.createElement("button");
-      b.textContent = label;
-      if (cls) b.className = cls;
-      b.onclick = ()=>{ answerEl.value = val; highlight(); };
-      return b;
-    };
-
-    answerEl = document.createElement("input");
-    answerEl.type = "hidden";
-    answerEl.value = prev?.answer || "";
-
-    const yes = mk(lang==="AR"?"نعم":"Yes","YES","primary");
-    const no  = mk(lang==="AR"?"لا":"No","NO","");
-    const nok = mk(lang==="AR"?"غير مطابق":"NOK","NOK","danger");
-
-    btnWrap.append(yes,no,nok);
-    wrap.appendChild(btnWrap);
-
-    const hint = document.createElement("div");
-    hint.className="hint";
-    hint.textContent = (lang==="AR")
-      ? "اختر الإجابة ثم اضغط التالي."
-      : "Choose an answer then Next.";
-    wrap.appendChild(hint);
-
-    function highlight(){
-      const v = (answerEl.value||"").toUpperCase();
-      [yes,no,nok].forEach(b=>b.style.outline="none");
-      if (v==="YES") yes.style.outline="2px solid rgba(24,169,87,.6)";
-      if (v==="NO")  no.style.outline ="2px solid rgba(255,255,255,.25)";
-      if (v==="NOK") nok.style.outline="2px solid rgba(229,72,77,.6)";
-    }
-    highlight();
-  } else {
-    // generic input
-    const inp = document.createElement(inputType === "textarea" ? "textarea" : "input");
-    inp.className = inputType === "textarea" ? "" : "input";
-    if (inp.tagName === "INPUT"){
-      inp.type = (["text","number","date","time"].includes(inputType)) ? inputType : "text";
-    }
-    inp.value = prev?.answer || "";
-    answerEl = inp;
-    wrap.appendChild(inp);
-  }
-
-  // Note
-  let noteEl = null;
-  if (needNote){
-    const lab = document.createElement("div");
-    lab.className="k"; lab.style.marginTop="10px";
-    lab.textContent = (lang==="AR") ? "ملاحظة" : "Note";
-    noteEl = document.createElement("textarea");
-    noteEl.value = prev?.note || "";
-    wrap.append(lab, noteEl);
-  }
-
-  // Photo
-  let photoEl = null, photoPreviewImg = null;
-  if (needPhoto){
-    const lab = document.createElement("div");
-    lab.className="k"; lab.style.marginTop="10px";
-    lab.textContent = (lang==="AR") ? "صورة" : "Photo";
-
-    photoEl = document.createElement("input");
-    photoEl.type = "file";
-    photoEl.accept = "image/*";
-    photoEl.className = "input";
-
-    const preview = document.createElement("div");
-    preview.className = "photoPreview " + (prev?.photoBase64 ? "" : "hide");
-
-    photoPreviewImg = document.createElement("img");
-    if (prev?.photoBase64) photoPreviewImg.src = prev.photoBase64;
-    preview.appendChild(photoPreviewImg);
-
-    const hint = document.createElement("div");
-    hint.className="hint";
-    hint.textContent = (lang==="AR")
-      ? "اختيار صورة (سيتم إرسالها Base64 - الأفضل لاحقًا نخزنها في Drive)."
-      : "Pick an image (sent as Base64 - later we can store in Drive).";
-
-    wrap.append(lab, photoEl, preview, hint);
-
-    photoEl.addEventListener("change", async ()=>{
-      const f = photoEl.files?.[0];
-      if (!f) return;
-      const b64 = await fileToBase64(f);
-      photoPreviewImg.src = b64;
-      preview.classList.remove("hide");
-    });
-  }
-
-  area.appendChild(wrap);
-
-  return {
-    getAnswer: ()=> answerEl?.value ?? "",
-    getNote:   ()=> noteEl?.value ?? "",
-    getPhotoBase64: ()=> (photoPreviewImg?.src && photoPreviewImg.src.startsWith("data:image/")) ? photoPreviewImg.src : (prev?.photoBase64 || "")
-  };
-}
-
 function fileToBase64(file){
   return new Promise((res, rej)=>{
     const r = new FileReader();
@@ -319,169 +177,280 @@ function fileToBase64(file){
   });
 }
 
-function render(){
-  const q = questions[idx];
-  if (!q){
-    $("statusV").textContent = "No questions";
-    $("qText").textContent = (lang==="AR") ? "لا توجد أسئلة مطابقة." : "No matching questions.";
-    $("answerArea").innerHTML = "";
-    $("progressTxt").textContent = "";
-    $("prevBtn").disabled = true;
-    $("nextBtn").disabled = true;
-    $("submitBtn").disabled = true;
-    return;
-  }
+/*** Bind header ***/
+$("visitIdV").textContent = visitId || "(missing)";
+$("workIdV").textContent  = workId  || "(missing)";
+$("tgIdV").textContent    = tgId    || "(missing)";
+$("typeV").textContent    = type;
+$("modeBadge").textContent = `MAZ Safety Form • ${type}`;
 
-  $("statusV").textContent = "READY";
-  $("qText").textContent = pickText(q) || `(Question ${idx+1})`;
+/*** Required param rule (A) **/
+function requireParamsOk(){
+  return !!visitId; // visitId required
+}
+
+let questions = [];
+
+function buildQuestionCard(q){
+  const inputType = (q.Input_Type || "yesno").trim().toLowerCase();
+  const isPhotoOnly = (inputType === "photo");
+
+  // طلبك: إذا Input_Type photo => ما يحتاج كتابة نهائياً
+  let needNote  = isPhotoOnly ? false : (normYN(q.Require_Note)  === "Y");
+  let needPhoto = (normYN(q.Require_Photo) === "Y") || isPhotoOnly;
+
+  const qc = document.createElement("div");
+  qc.className = "qcard";
+  qc.dataset.qid = q.Question_ID;
 
   const meta = [];
   if (q.Category) meta.push(`Category: ${q.Category}`);
   if (normYN(q.Is_Critical)==="Y") meta.push("CRITICAL");
   meta.push(`ID: ${q.Question_ID}`);
-  $("qMeta").innerHTML = meta.map(x=>`<span class="pill">${escapeHtml(x)}</span>`).join("");
 
-  const state = getState();
-  const prev = (state.answers || {})[q.Question_ID] || null;
-  const ui = buildAnswerUI(q, prev);
+  const metaDiv = document.createElement("div");
+  metaDiv.className = "qmeta";
+  metaDiv.innerHTML = meta.map(x=>`<span class="pill">${escapeHtml(x)}</span>`).join("");
 
-  $("progressTxt").textContent = `${idx+1} / ${questions.length}`;
+  const title = document.createElement("div");
+  title.className = "qtitle";
+  title.textContent = pickText(q) || q.Question_ID;
 
-  $("prevBtn").disabled = idx === 0;
-  $("nextBtn").disabled = false;
-  $("submitBtn").disabled = false;
+  const req = document.createElement("div");
+  req.className = "req";
+  const reqParts = [];
+  reqParts.push(lang==="AR" ? "إجابة مطلوبة" : "Answer required");
+  if (needPhoto) reqParts.push(lang==="AR" ? "صورة مطلوبة" : "Photo required");
+  if (needNote)  reqParts.push(lang==="AR" ? "ملاحظة مطلوبة" : "Note required");
+  req.textContent = reqParts.join(" • ");
 
-  $("prevBtn").onclick = ()=>{
-    idx = Math.max(0, idx-1);
-    setState({ ...state, idx });
-    toast("");
-    render();
-  };
+  const area = document.createElement("div");
+  area.style.marginTop = "10px";
 
-  $("nextBtn").onclick = async ()=>{
-    const payload = buildAnswerPayload(q, ui);
-    const ok = await sendAnswer(payload);
-    if (!ok) return;
+  // Answer
+  if (isPhotoOnly){
+    const hidden = document.createElement("input");
+    hidden.type = "hidden";
+    hidden.dataset.role = "answer";
+    hidden.value = "PHOTO";
+    area.appendChild(hidden);
+  } else if (["yesno","yn","bool"].includes(inputType)){
+    const hidden = document.createElement("input");
+    hidden.type = "hidden";
+    hidden.dataset.role = "answer";
+    hidden.value = "";
 
-    saveLocal(q, ui);
-    idx = Math.min(questions.length-1, idx+1);
-    setState({ ...getState(), idx });
-    toast((lang==="AR")?"تم الحفظ ✅":"Saved ✅", true);
-    render();
-  };
+    const btnWrap = document.createElement("div");
+    btnWrap.className = "btns";
 
-  $("submitBtn").onclick = async ()=>{
-    // احفظ إجابة السؤال الحالي قبل الإرسال
-    const payload = buildAnswerPayload(q, ui);
-    const ok1 = await sendAnswer(payload);
-    if (!ok1) return;
-    saveLocal(q, ui);
-
-    // Submit (معدّل: يرسل كل الإجابات + يدمج آخر سؤال احتياط)
-    const ok2 = await submitVisit(payload);
-    if (!ok2) return;
-
-    toast((lang==="AR")?"تم الإرسال ✅":"Submitted ✅", true);
-    $("statusV").textContent = "SUBMITTED";
-  };
-}
-
-function escapeHtml(s){
-  return String(s||"").replace(/[&<>"']/g, m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
-}
-
-function buildAnswerPayload(q, ui){
-  return {
-    visitId, workId, tgId, type,
-    questionId: q.Question_ID,
-    answer: (ui.getAnswer() || "").trim(),
-    note: (ui.getNote() || "").trim(),
-    photoBase64: ui.getPhotoBase64() || "",
-    createdAt: isoNow()
-  };
-}
-
-function saveLocal(q, ui){
-  const state = getState();
-  const answers = state.answers || {};
-  answers[q.Question_ID] = {
-    answer: ui.getAnswer(),
-    note: ui.getNote(),
-    photoBase64: ui.getPhotoBase64(),
-    savedAt: isoNow()
-  };
-  setState({ ...state, answers, idx });
-}
-
-async function sendAnswer(payload){
-  // تحقق بسيط: لازم answer ما يكون فاضي
-  if (!payload.answer){
-    toast((lang==="AR")?"اختر/اكتب إجابة أولاً.":"Please provide an answer first.", false);
-    return false;
-  }
-  try{
-    toast((lang==="AR")?"جارٍ الحفظ…":"Saving…", true);
-    const r = await fetch(ANSWERS_WEBHOOK_URL, {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    // لا نفترض JSON (عشان ما يفشل لو الويبهوك رجع نص)
-    const text = await r.text();
-    let j = null;
-    try { j = text ? JSON.parse(text) : null; } catch {}
-
-    if (!r.ok){
-      toast((lang==="AR")?"فشل الحفظ (Webhook)":"Save failed (Webhook)", false);
-      return false;
-    }
-    if (j && j.ok === false){
-      toast((lang==="AR")?"فشل الحفظ (Webhook)":"Save failed (Webhook)", false);
-      return false;
-    }
-    return true;
-  }catch(e){
-    toast((lang==="AR")?"فشل الاتصال بالويبهوك":"Webhook connection failed", false);
-    return false;
-  }
-}
-
-/*** ✅ submitVisit() بعد التعديل: يرسل كل الإجابات دفعة واحدة + ما يفترض JSON ***/
-async function submitVisit(payloadCurrent=null){
-  if (type !== "ENTRY"){
-    toast((lang==="AR")?"Submit لهذا النوع غير مفعّل الآن.":"Submit for this type is not enabled yet.", false);
-    return false;
-  }
-
-  // اجمع كل الإجابات المخزنة محليًا
-  const state = getState();
-  const answersObj = state.answers || {};
-
-  // دمج إجابة السؤال الحالي (احتياط)
-  if (payloadCurrent?.questionId){
-    answersObj[payloadCurrent.questionId] = {
-      answer: payloadCurrent.answer || "",
-      note: payloadCurrent.note || "",
-      photoBase64: payloadCurrent.photoBase64 || "",
-      savedAt: payloadCurrent.createdAt || isoNow()
+    const mk = (label, val, cls="")=>{
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      if (cls) b.className = cls;
+      b.onclick = ()=>{
+        hidden.value = val;
+        [yes,no,nok].forEach(x=>x.style.outline="none");
+        b.style.outline = "2px solid rgba(255,255,255,.35)";
+        updateProgress();
+      };
+      return b;
     };
+
+    const yes = mk(lang==="AR"?"نعم":"Yes","YES","primary");
+    const no  = mk(lang==="AR"?"لا":"No","NO","");
+    const nok = mk(lang==="AR"?"غير مطابق":"NOK","NOK","danger");
+    btnWrap.append(yes,no,nok);
+
+    area.appendChild(btnWrap);
+    area.appendChild(hidden);
+
+    const hint = document.createElement("div");
+    hint.className="hint";
+    hint.textContent = (lang==="AR") ? "اختر إجابة." : "Choose an answer.";
+    area.appendChild(hint);
+  } else {
+    const inp = document.createElement(inputType === "textarea" ? "textarea" : "input");
+    inp.dataset.role = "answer";
+    if (inp.tagName === "INPUT"){
+      inp.className = "input";
+      inp.type = (["text","number","date","time"].includes(inputType)) ? inputType : "text";
+      inp.addEventListener("input", updateProgress);
+    } else {
+      inp.addEventListener("input", updateProgress);
+    }
+    area.appendChild(inp);
   }
 
-  // حوّلها لمصفوفة
-  const answers = Object.entries(answersObj).map(([questionId, v]) => ({
-    questionId,
-    answer: (v?.answer || "").trim(),
-    note: (v?.note || "").trim(),
-    photoBase64: v?.photoBase64 || "",
-    savedAt: v?.savedAt || ""
-  }));
-
-  if (!answers.length){
-    toast((lang==="AR")?"ما فيه إجابات محفوظة للإرسال.":"No saved answers to submit.", false);
-    return false;
+  // Note (مسموح فقط إذا مو photo-only)
+  if (needNote){
+    const lab = document.createElement("div");
+    lab.className="k"; lab.style.marginTop="10px";
+    lab.textContent = (lang==="AR") ? "ملاحظة" : "Note";
+    const note = document.createElement("textarea");
+    note.dataset.role = "note";
+    note.addEventListener("input", updateProgress);
+    area.append(lab, note);
   }
 
+  // Photo
+  if (needPhoto){
+    const lab = document.createElement("div");
+    lab.className="k"; lab.style.marginTop="10px";
+    lab.textContent = (lang==="AR") ? "صورة" : "Photo";
+
+    const file = document.createElement("input");
+    file.type = "file";
+    file.accept = "image/*";
+    file.className = "input";
+    file.dataset.role = "photo";
+    file.addEventListener("change", updateProgress);
+
+    const hint = document.createElement("div");
+    hint.className="hint";
+    hint.textContent = (lang==="AR")
+      ? "ارفع صورة (مطلوبة حسب إعداد السؤال)."
+      : "Upload a photo (required per question settings).";
+
+    area.append(lab, file, hint);
+  }
+
+  qc.append(metaDiv, title, req, area);
+  return qc;
+}
+
+function updateProgress(){
+  const list = $("questionsList");
+  const cards = Array.from(list.querySelectorAll(".qcard[data-qid]"));
+
+  let filled = 0;
+  for (const q of questions){
+    const card = cards.find(c => c.dataset.qid === q.Question_ID);
+    if (!card) continue;
+
+    const inputType = (q.Input_Type || "yesno").trim().toLowerCase();
+    const isPhotoOnly = (inputType === "photo");
+    const needNote  = isPhotoOnly ? false : (normYN(q.Require_Note)  === "Y");
+    const needPhoto = (normYN(q.Require_Photo) === "Y") || isPhotoOnly;
+
+    const ansEl = card.querySelector('[data-role="answer"]');
+    const noteEl = card.querySelector('[data-role="note"]');
+    const fileEl = card.querySelector('[data-role="photo"]');
+
+    let ok = true;
+
+    const ansVal = (ansEl?.value || "").trim();
+    if (!ansVal) ok = false;
+
+    if (needNote){
+      const noteVal = (noteEl?.value || "").trim();
+      if (!noteVal) ok = false;
+    }
+
+    if (needPhoto){
+      const hasFile = !!(fileEl && fileEl.files && fileEl.files[0]);
+      if (!hasFile) ok = false;
+    }
+
+    if (ok) filled++;
+  }
+
+  $("progressTxt").textContent =
+    (lang==="AR")
+      ? `مكتمل: ${filled} / ${questions.length}`
+      : `Completed: ${filled} / ${questions.length}`;
+}
+
+function renderAll(){
+  const list = $("questionsList");
+  list.innerHTML = "";
+
+  if (!questions.length){
+    $("statusV").textContent = "NO QUESTIONS";
+    $("qText").textContent = (lang==="AR") ? "لا توجد أسئلة مطابقة." : "No matching questions.";
+    $("qHint").textContent = "";
+    $("submitBtn").disabled = true;
+    $("progressTxt").textContent = "";
+    return;
+  }
+
+  $("statusV").textContent = "READY";
+  $("qText").textContent = (lang==="AR") ? "الأسئلة المفعّلة" : "Enabled Questions";
+  $("qHint").textContent = (lang==="AR")
+    ? "كل سؤال إجابته مطلوبة. ثم اضغط إرسال."
+    : "All answers are required. Then press Submit.";
+
+  questions.forEach(q => list.appendChild(buildQuestionCard(q)));
+  $("submitBtn").disabled = false;
+  $("submitBtn").onclick = submitAll;
+
+  updateProgress();
+}
+
+async function submitAll(){
+  const list = $("questionsList");
+  const cards = Array.from(list.querySelectorAll(".qcard[data-qid]"));
+
+  // تحقق إلزامي (A) + تجهيز الإجابات
+  const answers = [];
+
+  for (const q of questions){
+    const card = cards.find(c => c.dataset.qid === q.Question_ID);
+    if (!card) continue;
+
+    const inputType = (q.Input_Type || "yesno").trim().toLowerCase();
+    const isPhotoOnly = (inputType === "photo");
+
+    const needNote  = isPhotoOnly ? false : (normYN(q.Require_Note)  === "Y");
+    const needPhoto = (normYN(q.Require_Photo) === "Y") || isPhotoOnly;
+
+    // answer
+    const ansEl = card.querySelector('[data-role="answer"]');
+    let answer = (ansEl?.value || "").trim();
+
+    // note
+    const noteEl = card.querySelector('[data-role="note"]');
+    const note = (noteEl?.value || "").trim();
+
+    // photo
+    const fileEl = card.querySelector('[data-role="photo"]');
+    let photoBase64 = "";
+    if (fileEl && fileEl.files && fileEl.files[0]){
+      photoBase64 = await fileToBase64(fileEl.files[0]);
+    }
+
+    // إلزاميات
+    if (!answer){
+      toast((lang==="AR")?`الإجابة مطلوبة للسؤال: ${q.Question_ID}`:`Answer required for: ${q.Question_ID}`, false);
+      card.scrollIntoView({behavior:"smooth", block:"center"});
+      return;
+    }
+
+    if (needNote && !note){
+      toast((lang==="AR")?`الملاحظة مطلوبة للسؤال: ${q.Question_ID}`:`Note required for: ${q.Question_ID}`, false);
+      card.scrollIntoView({behavior:"smooth", block:"center"});
+      return;
+    }
+
+    if (needPhoto && !photoBase64){
+      toast((lang==="AR")?`الصورة مطلوبة للسؤال: ${q.Question_ID}`:`Photo required for: ${q.Question_ID}`, false);
+      card.scrollIntoView({behavior:"smooth", block:"center"});
+      return;
+    }
+
+    // photo-only: answer ثابت PHOTO (احتياط)
+    if (isPhotoOnly) answer = "PHOTO";
+
+    answers.push({
+      questionId: q.Question_ID,
+      answer,
+      note: isPhotoOnly ? "" : note,
+      photoBase64,
+      savedAt: isoNow()
+    });
+  }
+
+  // إرسال إلى n8n (submit-entry)
   try{
     toast((lang==="AR")?"جارٍ الإرسال…":"Submitting…", true);
 
@@ -495,25 +464,21 @@ async function submitVisit(payloadCurrent=null){
       })
     });
 
-    // لا نفترض JSON
     const text = await r.text();
     let j = null;
     try { j = text ? JSON.parse(text) : null; } catch {}
 
-    if (!r.ok){
-      toast((lang==="AR")?"فشل الإرسال (Submit)":"Submit failed", false);
-      return false;
-    }
-    if (j && j.ok === false){
-      toast((lang==="AR")?"فشل الإرسال (Submit)":"Submit failed", false);
-      return false;
+    if (!r.ok || (j && j.ok === false)){
+      toast((lang==="AR")?"فشل الإرسال":"Submit failed", false);
+      return;
     }
 
-    return true;
+    toast((lang==="AR")?"تم الإرسال ✅":"Submitted ✅", true);
+    $("statusV").textContent = "SUBMITTED";
+    $("submitBtn").disabled = true;
 
   }catch(e){
-    toast((lang==="AR")?"فشل الاتصال (Submit)":"Submit connection failed", false);
-    return false;
+    toast((lang==="AR")?"فشل الاتصال":"Connection failed", false);
   }
 }
 
@@ -523,10 +488,10 @@ async function loadQuestions(){
     $("qText").textContent = (lang==="AR")
       ? "الرابط ناقص (visitId مطلوب)."
       : "Missing parameter (visitId required).";
-    $("answerArea").innerHTML = "";
-    $("prevBtn").disabled = true;
-    $("nextBtn").disabled = true;
+    $("qHint").textContent = "";
+    $("questionsList").innerHTML = "";
     $("submitBtn").disabled = true;
+    $("progressTxt").textContent = "";
     return;
   }
 
@@ -545,12 +510,8 @@ async function loadQuestions(){
 
   questions = filtered;
 
-  const state = getState();
-  idx = Math.min(Math.max(0, Number(state.idx||0)), Math.max(0, questions.length-1));
-  setState({ ...state, idx });
-
   toast("", true);
-  render();
+  renderAll();
 }
 
 loadQuestions();
